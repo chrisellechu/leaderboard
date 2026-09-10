@@ -3,9 +3,46 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Leaderboard</title>
+<title>Leaderboard (Live)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Arial&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet">
+
+<!--
+  ============================================================
+  FIREBASE SETUP -- read this before deploying.
+
+  This page needs a Firebase Realtime Database to sync across
+  devices. Firebase's own client library can only be loaded from
+  Google's CDN (there's no offline/bundled alternative), so unlike
+  the escape-room games, THIS page requires an internet connection
+  to work at all.
+
+  Steps (one-time setup, takes about 10 minutes):
+  1. Go to https://console.firebase.google.com and create a project
+     (free tier is enough for this).
+  2. In the project, go to Build > Realtime Database > Create Database.
+     Choose any region, start in "test mode" for now.
+  3. In Realtime Database > Rules, paste this and Publish:
+       {
+         "rules": {
+           ".read": true,
+           ".write": true
+         }
+       }
+     (This is fully open -- fine for a low-stakes leaderboard game,
+     not fine if you ever store anything sensitive here.)
+  4. Go to Project Settings (gear icon) > General > scroll to
+     "Your apps" > click the Web icon (</>) > register an app
+     (nickname can be anything, no need for Hosting).
+  5. Copy the firebaseConfig object it shows you and paste it over
+     the FIREBASE_CONFIG placeholder in the <script> block below,
+     replacing every "REPLACE_ME" value.
+  ============================================================
+-->
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+
 <style>
   :root{
     --blue:#2F449C;
@@ -15,6 +52,7 @@
     --ink:#1c2a5e;
     --muted:#8b95c2;
     --success:#2f9e5c;
+    --danger:#c0392b;
     --font-display: 'Fredoka', Arial, sans-serif;
     --font-body: Arial, "Helvetica Neue", Helvetica, sans-serif;
   }
@@ -32,6 +70,20 @@
 
   .wrap{ width:100%; max-width:760px; }
 
+  /* ===== CONNECTION STATUS ===== */
+  .conn-status{
+    text-align:center; font-size:11.5px; font-weight:700; margin-bottom:8px;
+    letter-spacing:.04em; text-transform:uppercase;
+  }
+  .conn-status.connecting{ color:var(--muted); }
+  .conn-status.live{ color:var(--success); }
+  .conn-status.error{ color:var(--danger); }
+  .conn-dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; }
+  .conn-status.connecting .conn-dot{ background:var(--muted); animation:pulseDot 1.2s ease-in-out infinite; }
+  .conn-status.live .conn-dot{ background:var(--success); }
+  .conn-status.error .conn-dot{ background:var(--danger); }
+  @keyframes pulseDot{ 0%,100%{opacity:.4;} 50%{opacity:1;} }
+
   /* ===== LEADERBOARD VIEW ===== */
   .lb-toolbar{
     display:flex; align-items:center; justify-content:space-between;
@@ -48,6 +100,7 @@
   }
   .btn-primary:hover{ filter:brightness(1.08); }
   .btn-primary:active{ transform:scale(0.97); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
 
   .board{
     background:#fff; border:3px solid var(--blue); border-radius:16px;
@@ -84,14 +137,10 @@
   .cell.empty-cell{ color:var(--muted); }
   .medal{ font-size:18px; margin-right:6px; }
 
-  .lb-empty-hint{
-    text-align:center; color:var(--muted); font-size:13px; padding:18px 10px;
-  }
-
   /* ===== ENTRY FORM VIEW ===== */
+  .lb-view.hidden{ display:none; }
   .form-screen{ display:none; }
   .form-screen.active{ display:block; }
-  .lb-view.hidden{ display:none; }
 
   .form-card{
     background:#fff; border:3px solid var(--blue); border-radius:20px;
@@ -126,7 +175,7 @@
   .time-row .time-unit{ font-size:11px; color:var(--muted); margin-top:4px; text-transform:uppercase; letter-spacing:.05em; }
   .time-row .colon{ font-family:var(--font-display); font-weight:700; font-size:24px; color:var(--blue); padding-bottom:16px; }
 
-  .form-err{ color:#c0392b; font-size:12.5px; text-align:center; min-height:16px; margin-bottom:8px; }
+  .form-err{ color:var(--danger); font-size:12.5px; text-align:center; min-height:16px; margin-bottom:8px; }
   .form-actions{ display:flex; gap:10px; margin-top:6px; }
   .btn-cancel{
     flex:0 0 100px; background:#eef0fa; color:var(--ink); border:none; border-radius:40px;
@@ -137,6 +186,7 @@
     padding:12px; font-size:15px; font-weight:700;
   }
   .btn-submit:hover{ filter:brightness(1.08); }
+  .btn-submit:disabled{ opacity:.5; cursor:not-allowed; }
 
   .confirm-banner{
     display:none; text-align:center; background:var(--success); color:#fff;
@@ -163,7 +213,7 @@
     border:1px solid #ccc; border-radius:8px; margin-bottom:10px;
   }
   .admin-pin-box button{ width:100%; padding:9px; border:none; border-radius:8px; background:var(--blue); color:#fff; font-weight:700; }
-  .admin-pin-err{ color:#c0392b; font-size:11px; min-height:14px; margin-bottom:4px; }
+  .admin-pin-err{ color:var(--danger); font-size:11px; min-height:14px; margin-bottom:4px; }
 
   .admin-panel{
     background:#fff; border-radius:14px; max-width:600px; width:100%; max-height:88vh; overflow-y:auto;
@@ -199,12 +249,14 @@
 
 <div class="wrap">
 
+  <div class="conn-status connecting" id="conn-status"><span class="conn-dot"></span>Connecting…</div>
+
   <!-- ===== LEADERBOARD VIEW ===== -->
   <div class="lb-view" id="lb-view">
     <div class="confirm-banner" id="confirm-banner"></div>
     <div class="lb-toolbar">
       <div class="lb-title" id="lb-title">LEADERBOARD</div>
-      <button class="btn-primary" id="btn-open-form">+ Enter Your Time</button>
+      <button class="btn-primary" id="btn-open-form" disabled>+ Enter Your Time</button>
     </div>
     <div class="board">
       <div class="board-header">
@@ -249,59 +301,112 @@
 
 </div>
 
-<script type="application/json" id="lb-config">
-{
-  "title": "LEADERBOARD",
-  "columnPlace": "Place",
-  "columnTeam": "Team",
-  "columnTime": "Time",
-  "minRows": 12,
-  "adminPin": "1000",
-  "sortDirection": "asc",
-  "showGear": true
-}
-</script>
-
 <script>
 'use strict';
 
 /* ================================================================
-   CONFIG + STORAGE
-   Everything lives in this one browser's localStorage -- by design,
-   per your call to keep this single-device only. Open this same
-   file/URL in a different browser or a different device and it
-   starts with an empty board, since localStorage never leaves the
-   device it was written on.
+   FIREBASE CONFIG -- replace with your own project's values
+   (Firebase Console > Project Settings > General > Your apps).
+   The page will show a connection error banner until this is filled
+   in with real values.
    ================================================================ */
-const CFG_DEFAULT = JSON.parse(document.getElementById('lb-config').textContent);
-const LS_ENTRIES = 'leaderboard_entries_v1';
-const LS_CONFIG  = 'leaderboard_config_v1';
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDm0WC9JWfPlb2JNZ7Hb7pGUHnUM9OLFa4",
+  authDomain: "virtual-sosme-leaderboard.firebaseapp.com",
+  databaseURL: "https://virtual-sosme-leaderboard-default-rtdb.firebaseio.com",
+  projectId: "virtual-sosme-leaderboard",
+  storageBucket: "virtual-sosme-leaderboard.firebasestorage.appspot.com",
+  messagingSenderId: "840435356293",
+  appId: "1:840435356293:web:78fa7fe1f48717c03d4fec"
+};
 
-let CFG = JSON.parse(localStorage.getItem(LS_CONFIG) || 'null') || {...CFG_DEFAULT};
-let entries = JSON.parse(localStorage.getItem(LS_ENTRIES) || '[]');
+const CFG_DEFAULT = {
+  title: "LEADERBOARD",
+  columnPlace: "Place",
+  columnTeam: "Team",
+  columnTime: "Time",
+  minRows: 12,
+  adminPin: "1000",
+  sortDirection: "asc",
+  showGear: true
+};
 
-function saveEntries(){ localStorage.setItem(LS_ENTRIES, JSON.stringify(entries)); }
-function saveConfig(){ localStorage.setItem(LS_CONFIG, JSON.stringify(CFG)); }
+let CFG = {...CFG_DEFAULT};
+let entries = [];
+let db = null;
+let isConnected = false;
 
-function fmtTime(totalSeconds){
-  const m = Math.floor(totalSeconds/60);
-  const s = totalSeconds%60;
-  return `${m}:${String(s).padStart(2,'0')}`;
+/* ================================================================
+   FIREBASE INIT
+   ================================================================ */
+function initFirebase(){
+  const statusEl = document.getElementById('conn-status');
+  try{
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.database();
+
+    // Firebase's own "am I actually connected" signal
+    db.ref('.info/connected').on('value', (snap) => {
+      if(snap.val() === true){
+        isConnected = true;
+        statusEl.className = 'conn-status live';
+        statusEl.innerHTML = '<span class="conn-dot"></span>Live';
+        document.getElementById('btn-open-form').disabled = false;
+      } else {
+        isConnected = false;
+        statusEl.className = 'conn-status connecting';
+        statusEl.innerHTML = '<span class="conn-dot"></span>Reconnecting…';
+        document.getElementById('btn-open-form').disabled = true;
+      }
+    });
+
+    db.ref('config').on('value', (snap) => {
+      CFG = Object.assign({}, CFG_DEFAULT, snap.val() || {});
+      renderLeaderboard();
+    }, (err) => showConnError(err));
+
+    db.ref('entries').on('value', (snap) => {
+      entries = [];
+      snap.forEach(child => {
+        entries.push({ id: child.key, ...child.val() });
+      });
+      renderLeaderboard();
+    }, (err) => showConnError(err));
+
+  }catch(err){
+    showConnError(err);
+  }
 }
 
-function sortedEntries(){
-  const dir = CFG.sortDirection === 'desc' ? -1 : 1;
-  return [...entries].sort((a,b)=> dir*(a.totalSeconds - b.totalSeconds));
+function showConnError(err){
+  const statusEl = document.getElementById('conn-status');
+  statusEl.className = 'conn-status error';
+  statusEl.innerHTML = '<span class="conn-dot"></span>Connection error — check FIREBASE_CONFIG and database rules';
+  console.error('Firebase error:', err);
 }
 
 /* ================================================================
    RENDER LEADERBOARD
    ================================================================ */
+function fmtTime(totalSeconds){
+  const m = Math.floor(totalSeconds/60);
+  const s = totalSeconds%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+function sortedEntries(){
+  const dir = CFG.sortDirection === 'desc' ? -1 : 1;
+  return [...entries].sort((a,b)=> dir*(a.totalSeconds - b.totalSeconds));
+}
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function renderLeaderboard(justAddedId){
   document.getElementById('lb-title').textContent = CFG.title;
   document.getElementById('col-place').textContent = CFG.columnPlace;
   document.getElementById('col-team').textContent = CFG.columnTeam;
   document.getElementById('col-time').textContent = CFG.columnTime;
+  if(CFG.showGear) document.getElementById('admin-gear').style.display = 'flex';
 
   const rowsEl = document.getElementById('board-rows');
   rowsEl.innerHTML = '';
@@ -331,10 +436,6 @@ function renderLeaderboard(justAddedId){
   }
 }
 
-function escapeHtml(s){
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
 /* ================================================================
    FORM VIEW
    ================================================================ */
@@ -342,6 +443,7 @@ const lbView = document.getElementById('lb-view');
 const formScreen = document.getElementById('form-screen');
 
 function openForm(){
+  if(!isConnected) return;
   document.getElementById('f-team').value='';
   document.getElementById('f-min').value='';
   document.getElementById('f-sec').value='';
@@ -357,7 +459,6 @@ function closeForm(){
 
 document.getElementById('btn-open-form').addEventListener('click', openForm);
 document.getElementById('btn-cancel').addEventListener('click', closeForm);
-
 document.getElementById('btn-submit').addEventListener('click', submitEntry);
 [document.getElementById('f-team'), document.getElementById('f-min'), document.getElementById('f-sec')].forEach(el=>{
   el.addEventListener('keydown', e=>{ if(e.key==='Enter') submitEntry(); });
@@ -369,6 +470,7 @@ function submitEntry(){
   const sec = parseInt(document.getElementById('f-sec').value, 10);
   const errEl = document.getElementById('form-err');
 
+  if(!isConnected){ errEl.textContent = 'Not connected yet — please wait a moment and try again.'; return; }
   if(!team){ errEl.textContent = 'Please enter a team name.'; return; }
   if(isNaN(min) && isNaN(sec)){ errEl.textContent = 'Please enter a completion time.'; return; }
   const m = isNaN(min)?0:Math.max(0,min);
@@ -376,19 +478,27 @@ function submitEntry(){
   const totalSeconds = m*60+s;
   if(totalSeconds<=0){ errEl.textContent = 'Time must be greater than zero.'; return; }
 
-  const entry = { id: 'e'+Date.now()+Math.random().toString(36).slice(2,7), team, totalSeconds };
-  entries.push(entry);
-  saveEntries();
-  closeForm();
-  renderLeaderboard(entry.id);
-  showConfirm(entry);
+  const submitBtn = document.getElementById('btn-submit');
+  submitBtn.disabled = true;
+
+  db.ref('entries').push({ team, totalSeconds, timestamp: Date.now() })
+    .then((ref) => {
+      submitBtn.disabled = false;
+      closeForm();
+      showConfirm(team, ref.key);
+    })
+    .catch((err) => {
+      submitBtn.disabled = false;
+      errEl.textContent = 'Could not save — check your connection and try again.';
+      console.error(err);
+    });
 }
 
-function showConfirm(entry){
+function showConfirm(team, newId){
   const ranked = sortedEntries();
-  const place = ranked.findIndex(e=>e.id===entry.id)+1;
+  const place = ranked.findIndex(e=>e.id===newId)+1;
   const banner = document.getElementById('confirm-banner');
-  banner.textContent = `Added! ${entry.team} is in place ${place}.`;
+  banner.textContent = place > 0 ? `Added! ${team} is in place ${place}.` : `Added, ${team}!`;
   banner.classList.add('show');
   clearTimeout(showConfirm._t);
   showConfirm._t = setTimeout(()=>banner.classList.remove('show'), 3200);
@@ -398,14 +508,15 @@ function showConfirm(entry){
    ADMIN MODE
    A client-side PIN like this offers only basic deterrence against
    casual participants opening the panel -- it is NOT secure
-   authentication. Anyone who reads this file's source can see the
-   PIN and the logic that checks it. Do not use this pattern to
-   protect anything sensitive.
+   authentication, and since the database rules in the setup
+   instructions are wide open, anyone who inspects this page's
+   network traffic could write to the database directly regardless
+   of this PIN. Fine for a low-stakes exhibit leaderboard; do not
+   reuse this pattern for anything sensitive.
    ================================================================ */
 const adminGear = document.getElementById('admin-gear');
 const adminOv = document.getElementById('admin-overlay');
 
-if(CFG.showGear){ adminGear.style.display='flex'; }
 adminGear.addEventListener('click', openAdminPin);
 document.addEventListener('keydown', e=>{
   if(e.ctrlKey && e.shiftKey && (e.key==='A'||e.key==='a')){ e.preventDefault(); openAdminPin(); }
@@ -437,7 +548,7 @@ function renderAdminPanel(){
   adminOv.innerHTML = `
     <div class="admin-panel">
       <h2>Admin Panel — Leaderboard</h2>
-      <p class="note">Edit any entry's team name or time, remove entries, or reset the whole board. Changes save immediately to this device.</p>
+      <p class="note">Edit any entry's team name or time, remove entries, or reset the whole board. Changes save to Firebase immediately and appear on every connected device within moments.</p>
 
       <div class="admin-field"><label>Board title</label><input type="text" id="af-title" value="${ea(CFG.title)}"></div>
       <div style="display:flex;gap:8px;">
@@ -473,54 +584,42 @@ function renderAdminPanel(){
   });
   list.querySelectorAll('[data-rm]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
-      entries = entries.filter(e=>e.id!==btn.dataset.rm);
-      saveEntries();
-      renderAdminPanel();
-      renderLeaderboard();
+      db.ref('entries/'+btn.dataset.rm).remove();
     });
   });
 
   document.getElementById('aa-apply').addEventListener('click', applyAdminEdits);
   document.getElementById('aa-reset').addEventListener('click', ()=>{
-    if(confirm('Reset the leaderboard? This removes every entry on this device.')){
-      entries = [];
-      saveEntries();
-      renderAdminPanel();
-      renderLeaderboard();
+    if(confirm('Reset the leaderboard? This removes every entry for everyone, on every device.')){
+      db.ref('entries').remove();
+      adminOv.classList.remove('show');
     }
   });
   document.getElementById('aa-close').addEventListener('click', ()=>adminOv.classList.remove('show'));
 }
 
 function applyAdminEdits(){
-  CFG.title = document.getElementById('af-title').value || 'LEADERBOARD';
-  CFG.columnPlace = document.getElementById('af-c1').value || 'Place';
-  CFG.columnTeam = document.getElementById('af-c2').value || 'Team';
-  CFG.columnTime = document.getElementById('af-c3').value || 'Time';
-  CFG.adminPin = document.getElementById('af-pin').value || CFG_DEFAULT.adminPin;
+  const newConfig = {
+    title: document.getElementById('af-title').value || 'LEADERBOARD',
+    columnPlace: document.getElementById('af-c1').value || 'Place',
+    columnTeam: document.getElementById('af-c2').value || 'Team',
+    columnTime: document.getElementById('af-c3').value || 'Time',
+    adminPin: document.getElementById('af-pin').value || CFG_DEFAULT.adminPin
+  };
+  db.ref('config').update(newConfig);
 
-  document.querySelectorAll('#admin-entries [data-field="team"]').forEach(input=>{
-    const e = entries.find(x=>x.id===input.dataset.id);
-    if(e) e.team = input.value.trim() || e.team;
+  const updates = {};
+  document.querySelectorAll('#admin-entries .admin-row-entry').forEach(row=>{
+    const id = row.querySelector('[data-field="team"]').dataset.id;
+    const team = row.querySelector('[data-field="team"]').value.trim();
+    const min = parseInt(row.querySelector('[data-field="min"]').value,10) || 0;
+    const sec = Math.max(0,Math.min(59, parseInt(row.querySelector('[data-field="sec"]').value,10) || 0));
+    updates[id] = { team, totalSeconds: min*60+sec };
   });
-  document.querySelectorAll('#admin-entries [data-field="min"]').forEach(input=>{
-    const e = entries.find(x=>x.id===input.dataset.id);
-    if(e){
-      const sec = e.totalSeconds%60;
-      e.totalSeconds = (parseInt(input.value,10)||0)*60 + sec;
-    }
-  });
-  document.querySelectorAll('#admin-entries [data-field="sec"]').forEach(input=>{
-    const e = entries.find(x=>x.id===input.dataset.id);
-    if(e){
-      const min = Math.floor(e.totalSeconds/60);
-      e.totalSeconds = min*60 + Math.max(0,Math.min(59,parseInt(input.value,10)||0));
-    }
+  Object.keys(updates).forEach(id=>{
+    db.ref('entries/'+id).update(updates[id]);
   });
 
-  saveConfig();
-  saveEntries();
-  renderLeaderboard();
   adminOv.classList.remove('show');
 }
 
@@ -528,6 +627,7 @@ function applyAdminEdits(){
    INIT
    ================================================================ */
 renderLeaderboard();
+initFirebase();
 </script>
 </body>
 </html>
