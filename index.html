@@ -704,12 +704,11 @@ function migrateToAlltime(){
   status.style.color = '#888';
   status.textContent = `Copying ${entries.length} entr${entries.length===1?'y':'ies'}…`;
 
-  // Read what's already in alltime/ so we can skip duplicates
+  // Read what's already in alltime/ so we can skip true duplicates
   db.ref('alltime').once('value').then(snap=>{
     const existing = {};
     snap.forEach(child=>{
       const v = child.val();
-      // Use team+totalSeconds as a simple fingerprint to avoid duplication
       existing[`${v.team}|${v.totalSeconds}`] = true;
     });
 
@@ -721,6 +720,9 @@ function migrateToAlltime(){
           team: e.team,
           totalSeconds: e.totalSeconds,
           timestamp: e.timestamp || Date.now(),
+          // Stamp with the CURRENT config values — this is the fix:
+          // entries submitted before event fields existed had no event
+          // info, so we apply whatever is set in Admin Mode right now.
           eventName: CFG.eventName || '',
           eventDate: CFG.eventDate || '',
           eventLocation: CFG.eventLocation || ''
@@ -739,7 +741,7 @@ function migrateToAlltime(){
     Promise.all(writes).then(()=>{
       btn.disabled = false;
       status.style.color = '#2f9e5c';
-      status.textContent = `✓ ${writes.length} entr${writes.length===1?'y':'ies'} copied to the all-time record successfully.`;
+      status.textContent = `✓ ${writes.length} entr${writes.length===1?'y':'ies'} copied with event info: "${CFG.eventName||'(no event name set)'}"`;
     }).catch(err=>{
       btn.disabled = false;
       status.style.color = '#c0392b';
