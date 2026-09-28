@@ -322,7 +322,10 @@ const CFG_DEFAULT = {
   minRows: 12,
   adminPin: "1000",
   sortDirection: "asc",
-  showGear: true
+  showGear: true,
+  eventName: "Pfizer School of Science",
+  eventDate: "",
+  eventLocation: ""
 };
 
 let CFG = {...CFG_DEFAULT};
@@ -523,10 +526,23 @@ function submitEntry(){
   const submitBtn = document.getElementById('btn-submit');
   submitBtn.disabled = true;
 
-  db.ref('entries').push({ team, totalSeconds: st.finalTime, timestamp: Date.now() })
-    .then((ref) => {
+  const record = {
+    team,
+    totalSeconds: st.finalTime,
+    timestamp: Date.now(),
+    eventName: CFG.eventName || '',
+    eventDate: CFG.eventDate || new Date().toLocaleDateString('en-US', {year:'numeric',month:'short',day:'numeric'}),
+    eventLocation: CFG.eventLocation || ''
+  };
+
+  // Write to current event board AND the permanent all-time record simultaneously.
+  // Resetting the board only clears entries/ — alltime/ is never touched.
+  const pushCurrent  = db.ref('entries').push(record);
+  const pushAlltime  = db.ref('alltime').push(record);
+
+  Promise.all([pushCurrent, pushAlltime])
+    .then(([ref]) => {
       submitBtn.disabled = false;
-      // Mark submitted before clearing so a reload doesn't re-open the form
       localStorage.setItem(K_SUBMITTED, 'true');
       clearTimerState();
       closeForm();
@@ -623,6 +639,14 @@ function renderAdminPanel(){
         <div class="admin-field" style="flex:1;"><label>Column 2 label</label><input type="text" id="af-c2" value="${ea(CFG.columnTeam)}"></div>
         <div class="admin-field" style="flex:1;"><label>Column 3 label</label><input type="text" id="af-c3" value="${ea(CFG.columnTime)}"></div>
       </div>
+
+      <div class="admin-field" style="margin-top:4px;"><label>Event Name <span style="font-weight:400;color:#999;">(saved with every submission to the all-time record)</span></label><input type="text" id="af-eventName" value="${ea(CFG.eventName)}" placeholder="e.g. Pfizer School of Science"></div>
+      <div style="display:flex;gap:8px;">
+        <div class="admin-field" style="flex:1;"><label>Event Date</label><input type="text" id="af-eventDate" value="${ea(CFG.eventDate)}" placeholder="e.g. Oct 15, 2026"></div>
+        <div class="admin-field" style="flex:1;"><label>Event Location</label><input type="text" id="af-eventLocation" value="${ea(CFG.eventLocation)}" placeholder="e.g. New York, NY"></div>
+      </div>
+      <p style="font-size:11px;color:#888;margin:0 0 12px 0;">Set these before each event. They are saved alongside every team's time in the permanent all-time record, so you can always trace which event each score came from.</p>
+
       <div class="admin-field"><label>Admin PIN</label><input type="text" id="af-pin" value="${ea(CFG.adminPin)}"></div>
 
       <div class="admin-field" style="margin-top:16px;"><label>Entries (ranked order)</label></div>
@@ -666,7 +690,10 @@ function applyAdminEdits(){
     columnPlace: document.getElementById('af-c1').value || 'Place',
     columnTeam: document.getElementById('af-c2').value || 'Team',
     columnTime: document.getElementById('af-c3').value || 'Time',
-    adminPin: document.getElementById('af-pin').value || CFG_DEFAULT.adminPin
+    adminPin: document.getElementById('af-pin').value || CFG_DEFAULT.adminPin,
+    eventName: document.getElementById('af-eventName').value.trim(),
+    eventDate: document.getElementById('af-eventDate').value.trim(),
+    eventLocation: document.getElementById('af-eventLocation').value.trim()
   };
   db.ref('config').update(newConfig);
 
