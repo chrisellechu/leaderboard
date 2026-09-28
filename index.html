@@ -757,7 +757,14 @@ function updateAlltimeEventInfo(){
   const status = document.getElementById('migrate-status');
   const btn = document.getElementById('aa-update-event');
 
-  if(!CFG.eventName && !CFG.eventDate && !CFG.eventLocation){
+  // Read directly from the form fields — they're still visible in the admin
+  // panel. This is more reliable than reading from CFG, which only updates
+  // after the Firebase config listener fires (async round-trip).
+  const eventName     = (document.getElementById('af-eventName')?.value || CFG.eventName || '').trim();
+  const eventDate     = (document.getElementById('af-eventDate')?.value || CFG.eventDate || '').trim();
+  const eventLocation = (document.getElementById('af-eventLocation')?.value || CFG.eventLocation || '').trim();
+
+  if(!eventName && !eventDate && !eventLocation){
     status.style.color = '#c0392b';
     status.textContent = 'No event info set — fill in Event Name/Date/Location first, then Save Changes.';
     return;
@@ -769,17 +776,18 @@ function updateAlltimeEventInfo(){
 
   db.ref('alltime').once('value').then(snap=>{
     const updates = {};
+    let count = 0;
     snap.forEach(child=>{
       const v = child.val();
-      // Only update entries that are missing event info
+      // Update any entry missing event info
       if(!v.eventName && !v.eventDate && !v.eventLocation){
-        updates[child.key + '/eventName']    = CFG.eventName    || '';
-        updates[child.key + '/eventDate']    = CFG.eventDate    || '';
-        updates[child.key + '/eventLocation']= CFG.eventLocation|| '';
+        updates[child.key + '/eventName']     = eventName;
+        updates[child.key + '/eventDate']     = eventDate;
+        updates[child.key + '/eventLocation'] = eventLocation;
+        count++;
       }
     });
 
-    const count = Object.keys(updates).length / 3;
     if(count === 0){
       btn.disabled = false;
       status.style.color = '#2f9e5c';
@@ -790,7 +798,7 @@ function updateAlltimeEventInfo(){
     db.ref('alltime').update(updates).then(()=>{
       btn.disabled = false;
       status.style.color = '#2f9e5c';
-      status.textContent = `✓ Updated ${count} entr${count===1?'y':'ies'} with "${CFG.eventName || CFG.eventDate || CFG.eventLocation}".`;
+      status.textContent = `✓ Updated ${count} entr${count===1?'y':'ies'} with "${eventName || eventDate || eventLocation}".`;
     }).catch(err=>{
       btn.disabled = false;
       status.style.color = '#c0392b';
@@ -811,6 +819,9 @@ function applyAdminEdits(){
     eventDate: document.getElementById('af-eventDate').value.trim(),
     eventLocation: document.getElementById('af-eventLocation').value.trim()
   };
+  // Update local CFG immediately — don't wait for the Firebase listener
+  // round-trip, so the Update Event Info button works straight away.
+  Object.assign(CFG, newConfig);
   db.ref('config').update(newConfig);
 
   const updates = {};
