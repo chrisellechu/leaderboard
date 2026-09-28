@@ -778,14 +778,12 @@ function updateAlltimeEventInfo(){
     const updates = {};
     let count = 0;
     snap.forEach(child=>{
-      const v = child.val();
-      // Update any entry missing event info
-      if(!v.eventName && !v.eventDate && !v.eventLocation){
-        updates[child.key + '/eventName']     = eventName;
-        updates[child.key + '/eventDate']     = eventDate;
-        updates[child.key + '/eventLocation'] = eventLocation;
-        count++;
-      }
+      // Update ALL entries — no condition — so this works whether entries
+      // have blank event info OR already have a name that needs correcting.
+      updates[child.key + '/eventName']     = eventName;
+      updates[child.key + '/eventDate']     = eventDate;
+      updates[child.key + '/eventLocation'] = eventLocation;
+      count++;
     });
 
     if(count === 0){
