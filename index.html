@@ -181,6 +181,12 @@
     flex:0 0 100px; background:#eef0fa; color:var(--ink); border:none; border-radius:40px;
     padding:12px; font-size:14px; font-weight:700;
   }
+  .locked-time{
+    font-size:38px; font-weight:800; color:var(--blue-deep);
+    text-align:center; letter-spacing:.05em; font-variant-numeric:tabular-nums;
+    background:#eef0fa; border-radius:10px; padding:14px;
+    border:2px solid var(--blue-line);
+  }
   .btn-submit{
     flex:1; background:var(--blue); color:#fff; border:none; border-radius:40px;
     padding:12px; font-size:15px; font-weight:700;
@@ -256,7 +262,6 @@
     <div class="confirm-banner" id="confirm-banner"></div>
     <div class="lb-toolbar">
       <div class="lb-title" id="lb-title">LEADERBOARD</div>
-      <button class="btn-primary" id="btn-open-form" disabled>+ Enter Your Time</button>
     </div>
     <div class="board">
       <div class="board-header">
@@ -268,32 +273,21 @@
     </div>
   </div>
 
-  <!-- ===== ENTRY FORM VIEW ===== -->
+  <!-- ===== TIMER ENTRY FORM (auto-opens when mission complete) ===== -->
   <div class="form-screen" id="form-screen">
     <div class="form-card">
-      <div class="form-title">Add Your Result</div>
-      <div class="form-sub">Enter your team name and completion time.</div>
+      <div class="form-title">Mission Complete! 🎉</div>
+      <div class="form-sub" id="form-sub">Enter your team name to save your time.</div>
       <div class="form-err" id="form-err"></div>
       <div class="field">
         <label>Team Name</label>
         <input type="text" id="f-team" maxlength="30" placeholder="e.g. The Molecule Menders" autocomplete="off">
       </div>
       <div class="field">
-        <label>Completion Time</label>
-        <div class="time-row">
-          <div class="time-input-wrap">
-            <input type="number" id="f-min" min="0" max="59" placeholder="00">
-            <div class="time-unit">Minutes</div>
-          </div>
-          <div class="colon">:</div>
-          <div class="time-input-wrap">
-            <input type="number" id="f-sec" min="0" max="59" placeholder="00">
-            <div class="time-unit">Seconds</div>
-          </div>
-        </div>
+        <label>Your Time</label>
+        <div class="locked-time" id="locked-time">–:––</div>
       </div>
       <div class="form-actions">
-        <button class="btn-cancel" id="btn-cancel">Cancel</button>
         <button class="btn-submit" id="btn-submit">Add to Leaderboard</button>
       </div>
     </div>
@@ -356,12 +350,12 @@ function initFirebase(){
         isConnected = true;
         statusEl.className = 'conn-status live';
         statusEl.innerHTML = '<span class="conn-dot"></span>Live';
-        document.getElementById('btn-open-form').disabled = false;
+        // Now that we're connected, safe to check if the timer already fired
+        checkAndOpenTimerForm();
       } else {
         isConnected = false;
         statusEl.className = 'conn-status connecting';
         statusEl.innerHTML = '<span class="conn-dot"></span>Reconnecting…';
-        document.getElementById('btn-open-form').disabled = true;
       }
     });
 
@@ -442,53 +436,99 @@ function renderLeaderboard(justAddedId){
 }
 
 /* ================================================================
-   FORM VIEW
-   ================================================================ */
-const lbView = document.getElementById('lb-view');
-const formScreen = document.getElementById('form-screen');
+   TIMER BRIDGE — localStorage → Firebase
+   Architecture:
+     • Kiosk iPad: timer overlay embed + this leaderboard embed
+     • Display screen: this same file with ?mode=display
 
-function openForm(){
-  if(!isConnected) return;
-  document.getElementById('f-team').value='';
-  document.getElementById('f-min').value='';
-  document.getElementById('f-sec').value='';
-  document.getElementById('form-err').textContent='';
+   When participant hits FINISH MISSION in Room 5:
+     1. Timer writes missionCompleted + missionFinalTime to localStorage
+     2. This file's storage event listener fires (same iPad, same origin)
+     3. The team-name form opens automatically with the locked time
+     4. Participant types team name → submits to Firebase
+     5. Firebase instantly updates the display screen (and any other device)
+
+   localStorage only bridges the SAME device — that's intentional here,
+   since the time needs to come from the kiosk iPad's actual timer.
+   Firebase then broadcasts the submission everywhere else.
+   ================================================================ */
+const K_COMPLETED   = 'missionCompleted';
+const K_FINALTIME   = 'missionFinalTime';
+const K_SUBMITTED   = 'missionTimeSubmitted';
+
+const lbView     = document.getElementById('lb-view');
+const formScreen  = document.getElementById('form-screen');
+
+function fmtTime(totalSeconds){
+  const m = Math.floor(totalSeconds/60);
+  const s = totalSeconds%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function getTimerState(){
+  return {
+    completed:  localStorage.getItem(K_COMPLETED) === 'true',
+    finalTime:  parseInt(localStorage.getItem(K_FINALTIME) || '0', 10),
+    submitted:  localStorage.getItem(K_SUBMITTED) === 'true'
+  };
+}
+
+function clearTimerState(){
+  localStorage.removeItem(K_COMPLETED);
+  localStorage.removeItem(K_FINALTIME);
+  localStorage.removeItem(K_SUBMITTED);
+  localStorage.removeItem('missionStarted');
+  localStorage.removeItem('missionStartTime');
+  localStorage.removeItem('missionCompletionTime');
+}
+
+function checkAndOpenTimerForm(){
+  if(DISPLAY_MODE) return;   // never open the form on the display screen
+  const st = getTimerState();
+  if(st.completed && !st.submitted && st.finalTime > 0){
+    openTimerForm(st.finalTime);
+  }
+}
+
+function openTimerForm(totalSeconds){
+  document.getElementById('f-team').value = '';
+  document.getElementById('form-err').textContent = '';
+  document.getElementById('locked-time').textContent = fmtTime(totalSeconds);
+  document.getElementById('form-sub').textContent =
+    `Your mission time was ${fmtTime(totalSeconds)}. Enter your team name to save it.`;
   lbView.classList.add('hidden');
   formScreen.classList.add('active');
-  setTimeout(()=>document.getElementById('f-team').focus(),50);
+  setTimeout(()=>document.getElementById('f-team').focus(), 50);
 }
+
 function closeForm(){
   lbView.classList.remove('hidden');
   formScreen.classList.remove('active');
 }
 
-document.getElementById('btn-open-form').addEventListener('click', openForm);
-document.getElementById('btn-cancel').addEventListener('click', closeForm);
 document.getElementById('btn-submit').addEventListener('click', submitEntry);
-[document.getElementById('f-team'), document.getElementById('f-min'), document.getElementById('f-sec')].forEach(el=>{
-  el.addEventListener('keydown', e=>{ if(e.key==='Enter') submitEntry(); });
+document.getElementById('f-team').addEventListener('keydown', e=>{
+  if(e.key==='Enter') submitEntry();
 });
 
 function submitEntry(){
   const team = document.getElementById('f-team').value.trim();
-  const min = parseInt(document.getElementById('f-min').value, 10);
-  const sec = parseInt(document.getElementById('f-sec').value, 10);
   const errEl = document.getElementById('form-err');
+  const st = getTimerState();
 
-  if(!isConnected){ errEl.textContent = 'Not connected yet — please wait a moment and try again.'; return; }
-  if(!team){ errEl.textContent = 'Please enter a team name.'; return; }
-  if(isNaN(min) && isNaN(sec)){ errEl.textContent = 'Please enter a completion time.'; return; }
-  const m = isNaN(min)?0:Math.max(0,min);
-  const s = isNaN(sec)?0:Math.max(0,Math.min(59,sec));
-  const totalSeconds = m*60+s;
-  if(totalSeconds<=0){ errEl.textContent = 'Time must be greater than zero.'; return; }
+  if(!isConnected){ errEl.textContent = 'Not connected to Firebase yet — please wait a moment.'; return; }
+  if(!team){ errEl.textContent = 'Please enter your team name.'; return; }
+  if(!st.finalTime){ errEl.textContent = 'No timer result found — please finish the mission first.'; return; }
 
   const submitBtn = document.getElementById('btn-submit');
   submitBtn.disabled = true;
 
-  db.ref('entries').push({ team, totalSeconds, timestamp: Date.now() })
+  db.ref('entries').push({ team, totalSeconds: st.finalTime, timestamp: Date.now() })
     .then((ref) => {
       submitBtn.disabled = false;
+      // Mark submitted before clearing so a reload doesn't re-open the form
+      localStorage.setItem(K_SUBMITTED, 'true');
+      clearTimerState();
       closeForm();
       showConfirm(team, ref.key);
     })
@@ -503,11 +543,25 @@ function showConfirm(team, newId){
   const ranked = sortedEntries();
   const place = ranked.findIndex(e=>e.id===newId)+1;
   const banner = document.getElementById('confirm-banner');
-  banner.textContent = place > 0 ? `Added! ${team} is in place ${place}.` : `Added, ${team}!`;
+  banner.textContent = place > 0
+    ? `Great work! ${team} finished in place ${place}.`
+    : `Great work, ${team}! Your time has been saved.`;
   banner.classList.add('show');
   clearTimeout(showConfirm._t);
-  showConfirm._t = setTimeout(()=>banner.classList.remove('show'), 3200);
+  showConfirm._t = setTimeout(()=>banner.classList.remove('show'), 4000);
 }
+
+// Real-time bridge: fires the moment the timer writes missionCompleted
+// to localStorage on the same iPad.
+window.addEventListener('storage', e=>{
+  if(e.key === K_COMPLETED && e.newValue === 'true'){
+    setTimeout(checkAndOpenTimerForm, 300);
+  }
+});
+
+// Fallback: also check on load in case the page opened after Finish
+// was already pressed (e.g. participant navigated back to this embed).
+checkAndOpenTimerForm();
 
 /* ================================================================
    ADMIN MODE
@@ -634,10 +688,6 @@ function applyAdminEdits(){
 /* ================================================================
    INIT
    ================================================================ */
-if(DISPLAY_MODE){
-  document.getElementById('btn-open-form').style.display = 'none';
-}
-
 renderLeaderboard();
 initFirebase();
 </script>
