@@ -830,9 +830,6 @@ function updateAlltimeEventInfo(){
   const status = document.getElementById('migrate-status');
   const btn = document.getElementById('aa-update-event');
 
-  // Read directly from the form fields — they're still visible in the admin
-  // panel. This is more reliable than reading from CFG, which only updates
-  // after the Firebase config listener fires (async round-trip).
   const eventName     = (document.getElementById('af-eventName')?.value || CFG.eventName || '').trim();
   const eventDate     = (document.getElementById('af-eventDate')?.value || CFG.eventDate || '').trim();
   const eventLocation = (document.getElementById('af-eventLocation')?.value || CFG.eventLocation || '').trim();
@@ -845,31 +842,41 @@ function updateAlltimeEventInfo(){
 
   btn.disabled = true;
   status.style.color = '#888';
-  status.textContent = 'Reading all-time record…';
+  status.textContent = 'Checking current entries…';
+
+  // Build a fingerprint set of entries currently on the board
+  // (team + totalSeconds). Only update all-time records that
+  // match a CURRENT entry — this protects historical records
+  // from past events from being overwritten.
+  const currentFingerprints = new Set(
+    entries.map(e => `${e.team}|${e.totalSeconds}`)
+  );
 
   db.ref('alltime').once('value').then(snap=>{
     const updates = {};
     let count = 0;
     snap.forEach(child=>{
-      // Update ALL entries — no condition — so this works whether entries
-      // have blank event info OR already have a name that needs correcting.
-      updates[child.key + '/eventName']     = eventName;
-      updates[child.key + '/eventDate']     = eventDate;
-      updates[child.key + '/eventLocation'] = eventLocation;
-      count++;
+      const v = child.val();
+      const fp = `${v.team}|${v.totalSeconds}`;
+      if(currentFingerprints.has(fp)){
+        updates[child.key + '/eventName']     = eventName;
+        updates[child.key + '/eventDate']     = eventDate;
+        updates[child.key + '/eventLocation'] = eventLocation;
+        count++;
+      }
     });
 
     if(count === 0){
       btn.disabled = false;
-      status.style.color = '#2f9e5c';
-      status.textContent = 'All entries already have event info — nothing to update.';
+      status.style.color = '#888';
+      status.textContent = 'No matching entries found in the all-time record for the current board.';
       return;
     }
 
     db.ref('alltime').update(updates).then(()=>{
       btn.disabled = false;
       status.style.color = '#2f9e5c';
-      status.textContent = `✓ Updated ${count} entr${count===1?'y':'ies'} with "${eventName || eventDate || eventLocation}".`;
+      status.textContent = `✓ Updated ${count} current-event entr${count===1?'y':'ies'} with "${eventName || eventDate || eventLocation}". Past events unchanged.`;
     }).catch(err=>{
       btn.disabled = false;
       status.style.color = '#c0392b';
@@ -906,27 +913,10 @@ function applyAdminEdits(){
     db.ref('entries/'+id).update(updates[id]);
   });
 
-  // Automatically sync event name/date/location to the all-time record
-  // so the user doesn't have to click a second button.
-  const eventName     = newConfig.eventName;
-  const eventDate     = newConfig.eventDate;
-  const eventLocation = newConfig.eventLocation;
-  if(eventName || eventDate || eventLocation){
-    db.ref('alltime').once('value').then(snap=>{
-      const alltimeUpdates = {};
-      snap.forEach(child=>{
-        alltimeUpdates[child.key + '/eventName']     = eventName;
-        alltimeUpdates[child.key + '/eventDate']     = eventDate;
-        alltimeUpdates[child.key + '/eventLocation'] = eventLocation;
-      });
-      if(Object.keys(alltimeUpdates).length){
-        db.ref('alltime').update(alltimeUpdates);
-      }
-    });
-  }
-
-  // Show a brief confirmation inside the panel instead of closing it,
-  // so the user can see the save worked and then use other tools.
+  // Show a brief confirmation and keep the panel open.
+  // IMPORTANT: Save Changes deliberately does NOT touch alltime/ —
+  // historical records from past events must never be overwritten
+  // when you update the event name for a new event.
   const saveBtn = document.getElementById('aa-apply');
   if(saveBtn){
     const orig = saveBtn.textContent;
