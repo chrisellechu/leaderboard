@@ -618,6 +618,51 @@ function checkPin(){
 
 function ea(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
+function addManualEntry(){
+  const team    = (document.getElementById('manual-team').value || '').trim();
+  const min     = parseInt(document.getElementById('manual-min').value, 10);
+  const sec     = parseInt(document.getElementById('manual-sec').value, 10);
+  const errEl   = document.getElementById('manual-err');
+  const btn     = document.getElementById('manual-add');
+
+  errEl.textContent = '';
+  if(!team){ errEl.textContent = 'Please enter a team name.'; return; }
+  if(isNaN(min) && isNaN(sec)){ errEl.textContent = 'Please enter a time.'; return; }
+  const m = isNaN(min) ? 0 : Math.max(0, min);
+  const s = isNaN(sec) ? 0 : Math.max(0, Math.min(59, sec));
+  const totalSeconds = m * 60 + s;
+  if(totalSeconds <= 0){ errEl.textContent = 'Time must be greater than zero.'; return; }
+
+  btn.disabled = true;
+  const record = {
+    team,
+    totalSeconds,
+    timestamp: Date.now(),
+    eventName:     CFG.eventName     || '',
+    eventDate:     CFG.eventDate     || '',
+    eventLocation: CFG.eventLocation || ''
+  };
+
+  Promise.all([
+    db.ref('entries').push(record),
+    db.ref('alltime').push(record)
+  ]).then(()=>{
+    btn.disabled = false;
+    // Clear the fields ready for another entry
+    document.getElementById('manual-team').value = '';
+    document.getElementById('manual-min').value  = '';
+    document.getElementById('manual-sec').value  = '';
+    errEl.style.color = '#2f9e5c';
+    errEl.textContent = `✓ ${team} added successfully.`;
+    setTimeout(()=>{ errEl.textContent=''; errEl.style.color='#c0392b'; }, 3000);
+    // Panel re-renders automatically via the Firebase entries listener
+  }).catch(err=>{
+    btn.disabled = false;
+    errEl.textContent = 'Could not save — check your connection and try again.';
+    console.error(err);
+  });
+}
+
 function removeEntry(id){
   db.ref('entries/' + id).remove();
   // No need to call renderAdminPanel() or renderLeaderboard() manually here --
@@ -649,7 +694,28 @@ function renderAdminPanel(){
 
       <div class="admin-field"><label>Admin PIN</label><input type="text" id="af-pin" value="${ea(CFG.adminPin)}"></div>
 
-      <div class="admin-field" style="margin-top:16px;"><label>Entries (ranked order)</label></div>
+      <div class="admin-field" style="margin-top:16px;">
+        <label>Add Entry Manually</label>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:4px;">
+          <div style="flex:2;min-width:120px;">
+            <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:2px;">Team Name</div>
+            <input type="text" id="manual-team" maxlength="30" placeholder="e.g. Team Rocket" style="width:100%;padding:7px 9px;font-size:13px;border:1px solid #ddd;border-radius:6px;font-family:inherit;">
+          </div>
+          <div style="flex:0 0 58px;">
+            <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:2px;">Min</div>
+            <input type="number" id="manual-min" min="0" max="59" placeholder="00" style="width:100%;padding:7px 6px;font-size:13px;text-align:center;border:1px solid #ddd;border-radius:6px;font-family:inherit;-moz-appearance:textfield;">
+          </div>
+          <div style="font-size:16px;font-weight:700;color:#aaa;padding-bottom:6px;">:</div>
+          <div style="flex:0 0 58px;">
+            <div style="font-size:10px;font-weight:700;color:#555;margin-bottom:2px;">Sec</div>
+            <input type="number" id="manual-sec" min="0" max="59" placeholder="00" style="width:100%;padding:7px 6px;font-size:13px;text-align:center;border:1px solid #ddd;border-radius:6px;font-family:inherit;-moz-appearance:textfield;">
+          </div>
+          <button type="button" id="manual-add" style="flex:0 0 auto;padding:7px 16px;background:#2F449C;color:#fff;border:none;border-radius:6px;font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap;">Add Entry</button>
+        </div>
+        <div id="manual-err" style="font-size:11px;color:#c0392b;min-height:14px;margin-top:4px;"></div>
+      </div>
+
+      <div class="admin-field" style="margin-top:8px;"><label>Entries (ranked order)</label></div>
       <div id="admin-entries"></div>
 
       <div class="admin-actions">
@@ -682,6 +748,8 @@ function renderAdminPanel(){
     list.appendChild(row);
   });
 
+  document.getElementById('manual-add').addEventListener('click', addManualEntry);
+  document.getElementById('manual-sec').addEventListener('keydown', e=>{ if(e.key==='Enter') addManualEntry(); });
   document.getElementById('aa-apply').addEventListener('click', applyAdminEdits);
   document.getElementById('aa-reset').addEventListener('click', ()=>{
     if(confirm('Reset the leaderboard? This removes every entry for everyone, on every device.')){
